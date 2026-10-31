@@ -1,0 +1,16 @@
+mysql-data/
+target/
+*.war
+*.class
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Carpeta de compilación de Maven y reportes de Dependency-Check
+target/
+# Carpetas de reportes locales
+reports/
+dependency-check-reports/
+# Archivos del sistema de macOS
+.DS_Store
