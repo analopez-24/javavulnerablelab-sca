@@ -1,0 +1,122 @@
+# Nombre que se muestra en la pestaña Actions de GitHub
+name: SCA - Dependency-Check
+
+# Define cuándo se ejecuta el workflow
+on:
+  # Evento: cada vez que alguien hace push
+  push:
+    # Solo si el push es a la rama main
+    branches: [main]
+  # Evento: cada vez que se abre o actualiza un pull request
+  pull_request:
+    # Solo si el pull request apunta hacia main
+    branches: [main]
+  # Permite ejecutarlo manualmente desde la pestaña Actions
+  workflow_dispatch:
+
+# Permisos mínimos que recibe el token del workflow
+permissions:
+  # Leer el código del repositorio
+  contents: read
+  # Escribir resultados en Security > Code scanning
+  security-events: write
+
+# Lista de trabajos (jobs) del workflow
+jobs:
+  # Identificador interno del job de análisis SCA
+  dependency-check:
+    # Nombre que se muestra en la interfaz de Actions
+    name: Dependency-Check
+    # Tipo de máquina virtual donde corre el job
+    runs-on: ubuntu-latest
+    # Pasos que se ejecutan en orden
+    steps:
+      # Paso 1: descargar el código del repositorio en la máquina virtual
+      - name: Descargar el código
+        # Acción oficial de GitHub para hacer checkout
+        uses: actions/checkout@v4
+
+      # Paso 2: instalar Java 17 (requerido por Maven y Dependency-Check)
+      - name: Preparar Java 17
+        # Acción oficial para instalar un JDK
+        uses: actions/setup-java@v4
+        # Parámetros de la acción
+        with:
+          # Distribución del JDK (Temurin, de Eclipse Adoptium)
+          distribution: temurin
+          # Versión de Java que pide el laboratorio
+          java-version: '17'
+
+      # Paso 3: restaurar la base del NVD guardada en ejecuciones anteriores
+      - name: Restaurar caché de la base del NVD
+        # Acción que solo restaura (el guardado se hace en otro paso)
+        uses: actions/cache/restore@v4
+        # Parámetros de la caché
+        with:
+          # Carpeta donde el plugin de Maven guarda la base del NVD
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          # Clave única por ejecución, para poder guardar una caché nueva cada vez
+          key: nvd-${{ runner.os }}-${{ github.run_id }}
+          # Prefijo para restaurar la caché más reciente de ejecuciones anteriores
+          restore-keys: nvd-${{ runner.os }}-
+
+      # Paso 4: ejecutar Dependency-Check con el plugin de Maven y generar los reportes
+      - name: Ejecutar Dependency-Check
+        # Variables de entorno disponibles solo para este paso
+        env:
+          # La clave del NVD se lee del secreto de GitHub, nunca se escribe en el YAML
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        # Comando: -B modo batch, formato ALL (incluye HTML, XML y SARIF), clave del NVD y OSS Index desactivado
+        run: mvn -B org.owasp:dependency-check-maven:13.0.0:check "-Dformat=ALL" "-DnvdApiKey=$NVD_API_KEY" "-DossindexAnalyzerEnabled=false"
+
+      # Paso 5: guardar la base del NVD para las próximas ejecuciones
+      - name: Guardar caché de la base del NVD
+        # Se ejecuta siempre, aunque Dependency-Check haya fallado
+        if: always()
+        # Acción que solo guarda la caché
+        uses: actions/cache/save@v4
+        # Parámetros de la caché
+        with:
+          # Misma carpeta que se restauró antes
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          # Misma clave única de esta ejecución
+          key: nvd-${{ runner.os }}-${{ github.run_id }}
+
+      # Paso 6: subir el SARIF a Security > Code scanning de GitHub
+      - name: Subir SARIF a Code scanning
+        # Se ejecuta siempre, aunque Dependency-Check haya fallado
+        if: always()
+        # Acción oficial que carga un SARIF de cualquier herramienta
+        uses: github/codeql-action/upload-sarif@v4
+        # Parámetros de la acción
+        with:
+          # Ruta del reporte SARIF generado por Dependency-Check
+          sarif_file: target/dependency-check-report.sarif
+          # Categoría con la que se agrupan las alertas en Code scanning
+          category: dependency-check
+
+      # Paso 7: guardar el reporte HTML como artefacto descargable
+      - name: Guardar reporte HTML como artefacto
+        # Se ejecuta siempre, aunque Dependency-Check haya fallado
+        if: always()
+        # Acción oficial para subir artefactos
+        uses: actions/upload-artifact@v4
+        # Parámetros de la acción
+        with:
+          # Nombre del artefacto que se verá en la sección Artifacts
+          name: dependency-check-html
+          # Ruta del reporte HTML generado por Dependency-Check
+          path: target/dependency-check-report.html
+
+      # Paso 8: guardar el reporte XML como artefacto descargable
+      - name: Guardar reporte XML como artefacto
+        # Se ejecuta siempre, aunque Dependency-Check haya fallado
+        if: always()
+        # Acción oficial para subir artefactos
+        uses: actions/upload-artifact@v4
+        # Parámetros de la acción
+        with:
+          # Nombre del artefacto que se verá en la sección Artifacts
+          name: dependency-check-xml
+          # Ruta del reporte XML generado por Dependency-Check
+          path: target/dependency-check-report.xml
